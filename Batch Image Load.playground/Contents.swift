@@ -114,7 +114,7 @@ func requestSynchronousData(request: NSURLRequest) -> NSData? {
 
 
 
-let flickrURL = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=red&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
+let flickrURL = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=blue&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
 
 //let flickrURL2 = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=tennis&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
 
@@ -471,10 +471,68 @@ private func loadParallelUsingNSURLConnection(){
     
 }
 
+private func loadUsingNSURLConnectionAsynchronousRequest(){
+    let timer = ParkBenchTimer()
+    dispatch_async(accessQueue) {print("\nloadUsingNSURLConnectionAsynchronousRequest() Called")}
+    
+    var imageArray = [NSImage]()
+    let url: NSURL = NSURL(string:flickrURL)!
+    let operationQueue = NSOperationQueue()
+    operationQueue.maxConcurrentOperationCount = 8
+    let downloadGroup = dispatch_group_create()
+    
+    if let jsonData:NSData = NSData(contentsOfURL: url){
+        do {
+            if let jsonDict = try NSJSONSerialization.JSONObjectWithData(jsonData, options: NSJSONReadingOptions.MutableContainers) as? NSDictionary {
+                if let photoArray = jsonDict["photos"]?["photo"] as? [[String:AnyObject]] {
+                    for flickrImageRecord in photoArray {
+                        
+                        if let imageURL = NSURL(string:flickrImageRecord["url_q"] as! String){
+                            // sleep(1)
+                            
+                            let request = NSURLRequest(URL: imageURL)
+                            
+                            dispatch_group_enter(downloadGroup)
+                            NSURLConnection.sendAsynchronousRequest(request, queue: operationQueue, completionHandler:{ (response: NSURLResponse?, dataVal: NSData?, error: NSError?) -> Void in
+                                
+                                let image = NSImage(data: dataVal!)!
+                                dispatch_async(accessQueue) { imageArray.append(image) }
+                                
+                                dispatch_group_leave(downloadGroup)
+                                
+                            })
+                        }
+                    }
+                }
+            }
+        } catch let error as NSError {
+            print("Failed to load: \(error.localizedDescription)")
+        }
+    }
+    
+    // blocks the main thread until the dispatchgroup is empty
+    dispatch_group_wait(downloadGroup, DISPATCH_TIME_FOREVER)
+    // print("dispatch_group emptied")
+    
+    // print the results
+    dispatch_async(accessQueue) {
+        let s = String(format: "%.4f", timer.stop())
+        
+        print("loadUsingNSURLConnectionAsynchronousRequest took \(s) seconds and resulted in \(imageArray.count) items in the image array.")
+    }
+    
+}
+
+
 
 // Now call the funcitons ;-)
+
 /*
-loadSerialUsingNSData()
+ loadSerialUsingNSURLConnection()
+ 
+ loadParallelUsingNSURLConnection()
+
+ loadSerialUsingNSData()
 
 loadSerialUsingNSURLSession()
 
@@ -485,9 +543,9 @@ loadParallelUsingNSURLSession()
 loadUsingNSURLSessionTask()
 */
 
-loadSerialUsingNSURLConnection()
+loadUsingNSURLConnectionAsynchronousRequest()
 
-// loadParallelUsingNSURLConnection()
+
 
 
 
