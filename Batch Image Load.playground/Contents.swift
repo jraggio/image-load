@@ -19,6 +19,9 @@
 
 // It really seems that array.append is expensive, more than even getting a URL via request.  Better off with a fixed array and insert into index?
 
+// 6/15/16 - Added a serial and parralel versions using NSURLConnection, which is deprecated.  I used the sendSynchronousRequest call in a loop and also in asynchTasks.  
+// Suprisingly this method worked fast than any other.  When changing the search string it was obvious that this method definitely benefited from a cache.
+
 /*
  
 *** First Run ***
@@ -111,7 +114,7 @@ func requestSynchronousData(request: NSURLRequest) -> NSData? {
 
 
 
-let flickrURL = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=wood&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
+let flickrURL = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=red&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
 
 //let flickrURL2 = "https://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=5423dbab63f23a62ca4a986e7cbb35e2&per_page=200&tags=tennis&sort=relevance&safe_search=1&media=photos&extras=url_q&format=json&nojsoncallback=1"
 
@@ -358,7 +361,119 @@ private func loadUsingNSURLSessionTask(){
     
 }
 
+private func loadSerialUsingNSURLConnection(){
+    let timer = ParkBenchTimer()
+    dispatch_async(accessQueue) {print("\nloadSerialUsingNSURLConnection() Called")}
+    
+    var imageArray = [NSImage]()
+    let url: NSURL = NSURL(string:flickrURL)!
+    
+    if let jsonData:NSData = NSData(contentsOfURL: url){
+        do {
+            if let jsonDict = try NSJSONSerialization.JSONObjectWithData(jsonData, options: NSJSONReadingOptions.MutableContainers) as? NSDictionary {
+                if let photoArray = jsonDict["photos"]?["photo"] as? [[String:AnyObject]] {
+                    for flickrImageRecord in photoArray {
+                        if let imageURL = NSURL(string:flickrImageRecord["url_q"] as! String){
+                            let request = NSURLRequest(URL: imageURL)
+                            // print(request)
+                            
+                            let response: AutoreleasingUnsafeMutablePointer<NSURLResponse?>=nil
+                            
+                            do{
+                                
+                                let dataVal = try NSURLConnection.sendSynchronousRequest(request, returningResponse: response)
+                                let image = NSImage(data: dataVal)!
+                                dispatch_async(accessQueue) { imageArray.append(image) }
+                                // imageArray.append(image)
+                                
+                            }catch let error as NSError
+                            {
+                                print(error.localizedDescription)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch let error as NSError {
+            print("Failed to load: \(error.localizedDescription)")
+        }
+    }
+    
+    dispatch_async(accessQueue) {
+        let s = String(format: "%.4f", timer.stop())
+        print("loadSerialUsingNSURLConnection took \(s) seconds and resulted in \(imageArray.count) items in the image array.")
+    }
+    
+}
+
+private func loadParallelUsingNSURLConnection(){
+    let timer = ParkBenchTimer()
+    dispatch_async(accessQueue) {print("\nloadParallelUsingNSURLConnection() Called")}
+    
+    var imageArray = [NSImage]()
+    let url: NSURL = NSURL(string:flickrURL)!
+    let operationQueue = NSOperationQueue()
+    operationQueue.maxConcurrentOperationCount = 8
+    
+    if let jsonData:NSData = NSData(contentsOfURL: url){
+        do {
+            if let jsonDict = try NSJSONSerialization.JSONObjectWithData(jsonData, options: NSJSONReadingOptions.MutableContainers) as? NSDictionary {
+                if let photoArray = jsonDict["photos"]?["photo"] as? [[String:AnyObject]] {
+                    for flickrImageRecord in photoArray {
+                        // print(flickrImageRecord)
+                        let blockOperation = NSBlockOperation()
+                        
+                        blockOperation.addExecutionBlock {
+                            
+                            if let imageURL = NSURL(string:flickrImageRecord["url_q"] as! String){
+                                // sleep(1)
+                                
+                                let request = NSURLRequest(URL: imageURL)
+                                // print(request)
+                                
+                                let response: AutoreleasingUnsafeMutablePointer<NSURLResponse?>=nil
+                                
+                                do{
+                                    
+                                    let dataVal = try NSURLConnection.sendSynchronousRequest(request, returningResponse: response)
+                                    let image = NSImage(data: dataVal)!
+                                    dispatch_async(accessQueue) { imageArray.append(image) }
+                                    // imageArray.append(image)
+                                    
+                                }catch let error as NSError
+                                {
+                                    print(error.localizedDescription)
+                                }
+                                
+                            }
+                            
+                        } // end operation block
+                        
+                        operationQueue.addOperation(blockOperation)
+                    }
+                }
+            }
+        } catch let error as NSError {
+            print("Failed to load: \(error.localizedDescription)")
+        }
+    }
+    
+    // blocks the main thread until the queue is empty
+    operationQueue.waitUntilAllOperationsAreFinished()
+    // print("Queue emptied")
+    
+    // print the results
+    dispatch_async(accessQueue) {
+        let s = String(format: "%.4f", timer.stop())
+        
+        print("loadParallelUsingNSURLConnection took \(s) seconds and resulted in \(imageArray.count) items in the image array.")
+    }
+    
+}
+
+
 // Now call the funcitons ;-)
+/*
 loadSerialUsingNSData()
 
 loadSerialUsingNSURLSession()
@@ -368,3 +483,12 @@ loadParallelUsingNSData()
 loadParallelUsingNSURLSession()
 
 loadUsingNSURLSessionTask()
+*/
+
+loadSerialUsingNSURLConnection()
+
+// loadParallelUsingNSURLConnection()
+
+
+
+
